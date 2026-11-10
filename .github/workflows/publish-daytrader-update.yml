@@ -1,0 +1,74 @@
+name: Publish Day Trader Release
+
+on:
+  push:
+    paths:
+      - 'release-assets/ChatGPT_DayTrader_Update.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate ZIP and version
+        id: validate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, re, stat, zipfile
+          path = pathlib.Path('release-assets/ChatGPT_DayTrader_Update.zip')
+          if not path.is_file() or not (100 <= path.stat().st_size <= 25 * 1024 * 1024):
+              raise SystemExit('Expected release-assets/ChatGPT_DayTrader_Update.zip (up to 25MB)')
+          required = {'bot.py', 'updater.py', 'RUN_ALL.bat', 'unified_control.py',
+                      'unified_setup.py', 'requirements.txt', 'version.json'}
+          with zipfile.ZipFile(path) as archive:
+              entries = archive.infolist()
+              if len(entries) > 250:
+                  raise SystemExit('Too many files')
+              names = set()
+              for item in entries:
+                  name = item.filename
+                  if item.is_dir():
+                      continue
+                  if not name.startswith('chatgpt_daytrader/'):
+                      raise SystemExit('Unexpected archive prefix')
+                  rel = name.removeprefix('chatgpt_daytrader/')
+                  parts = rel.split('/')
+                  if any(x in ('', '.', '..') or x.startswith('.env') for x in parts):
+                      raise SystemExit('Unsafe path or credential file found')
+                  if any(x in ('.venv', '.git', 'STOP.txt', 'update_config.json') for x in parts):
+                      raise SystemExit('Protected local file found in release')
+                  if stat.S_IFMT(item.external_attr >> 16) == stat.S_IFLNK:
+                      raise SystemExit('Symlinks are not allowed')
+                  names.add(rel)
+              if not required.issubset(names):
+                  raise SystemExit('Required bot files are missing')
+              if sum(i.file_size for i in entries) > 80 * 1024 * 1024:
+                  raise SystemExit('Expanded archive too large')
+              version = json.loads(archive.read('chatgpt_daytrader/version.json'))['version']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+              raise SystemExit('Invalid version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('version=' + version + '\n')
+          print('Validated update v' + version)
+          PY
+      - name: Publish release if tag does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.validate.outputs.version }}
+        shell: bash
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists. Refusing to overwrite it."
+            exit 1
+          fi
+          gh release create "v${VERSION}" \
+            "release-assets/ChatGPT_DayTrader_Update.zip#ChatGPT_DayTrader_Update.zip" \
+            --title "ChatGPT Day Trader v${VERSION}" \
+            --notes "Signed-in publisher test update. Check version.json and update_history.jsonl after installing. Paper trading should be tested before live use." \
+            --target "${GITHUB_SHA}" \
+            --latest
