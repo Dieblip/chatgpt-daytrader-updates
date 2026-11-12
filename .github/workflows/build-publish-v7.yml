@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'release-patches/v7.0.0.patch.gz.b64'
+      - '.github/workflows/build-publish-v7.yml'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +18,7 @@ jobs:
 
       - name: Download the pinned v6.1.0 release
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -72,7 +73,7 @@ jobs:
 
       - name: Publish new version if no v7.0.0 release exists
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
