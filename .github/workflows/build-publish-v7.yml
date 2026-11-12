@@ -1,0 +1,87 @@
+name: Build & publish ChatGPT Day Trader v7.0.0
+
+on:
+  push:
+    paths:
+      - 'release-patches/v7.0.0.patch.gz.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the pinned v6.1.0 release
+        env:
+          GH_TOKEN: \${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p base
+          gh release download v6.1.0 --repo "$GITHUB_REPOSITORY" --pattern ChatGPT_DayTrader_Update.zip --dir base
+          echo '58d18f38cd1ddaa2fcfb759313995a1124909ae970e7d735a856c59be9735f99  base/ChatGPT_DayTrader_Update.zip' | sha256sum -c -
+
+      - name: Apply verified source-code overhaul
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          unzip -q base/ChatGPT_DayTrader_Update.zip -d output
+          base64 --decode release-patches/v7.0.0.patch.gz.b64 | gzip --decompress > v7.patch
+          (cd output && git apply --check ../v7.patch && git apply ../v7.patch)
+          python - <<'PY'
+          import json, pathlib
+          path = pathlib.Path('output/chatgpt_daytrader')
+          assert json.loads((path/'version.json').read_text())['version'] == '7.0.0'
+          assert (path/'diagnostics_v7.py').is_file()
+          assert not (path/'.env').exists()
+          PY
+
+      - name: Install dependencies and run all automated tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q --disable-pip-version-check -r output/chatgpt_daytrader/requirements.txt
+          cd output/chatgpt_daytrader
+          python -m compileall -q .
+          python -m unittest discover -s tests -v
+
+      - name: Build and verify update archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd output/chatgpt_daytrader && python build_release.py)
+          python - <<'PY'
+          import hashlib, json, pathlib, tempfile
+          import sys
+          sys.path.insert(0,'output/chatgpt_daytrader')
+          from updater import Release, _stage_zip
+          target = pathlib.Path('output/ChatGPT_DayTrader_Update.zip')
+          digest = hashlib.sha256(target.read_bytes()).hexdigest()
+          release = Release('Dieblip/chatgpt-daytrader-updates','v7.0.0',
+                            'https://github.com/Dieblip/chatgpt-daytrader-updates/releases/download/v7.0.0/ChatGPT_DayTrader_Update.zip',
+                            digest,target.stat().st_size)
+          with tempfile.TemporaryDirectory() as t:
+              paths = _stage_zip(target,pathlib.Path(t),release)
+              print(f'Safe update archive: {len(paths)} files; SHA-256 {digest}')
+          PY
+
+      - name: Publish new version if no v7.0.0 release exists
+        env:
+          GH_TOKEN: \${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v7.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v7.0.0 already exists; refusing to overwrite a published release'
+            exit 1
+          fi
+          gh release create v7.0.0 output/ChatGPT_DayTrader_Update.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --title 'ChatGPT Day Trader v7.0.0 — Reliability Overhaul' \
+            --notes-file output/chatgpt_daytrader/CHANGES_V7.md \
+            --latest
