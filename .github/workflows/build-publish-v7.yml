@@ -47,10 +47,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install -q --disable-pip-version-check -r output/chatgpt_daytrader/requirements.txt
+          python -m pip install -q --disable-pip-version-check -r output/chatgpt_daytrader/requirements.txt pytest
           cd output/chatgpt_daytrader
           python -m compileall -q .
-          python -m unittest discover -s tests -v
+          python -m pytest tests -q
 
       - name: Build and verify update archive
         shell: bash
