@@ -33,7 +33,8 @@ jobs:
           mkdir -p output
           unzip -q base/ChatGPT_DayTrader_Update.zip -d output
           base64 --decode release-patches/v7.0.0.patch.gz.b64 | gzip --decompress > v7.patch
-          (cd output && git apply --check ../v7.patch && git apply ../v7.patch)
+          git apply --check --directory=output v7.patch
+          git apply --directory=output v7.patch
           python - <<'PY'
           import json, pathlib
           path = pathlib.Path('output/chatgpt_daytrader')
